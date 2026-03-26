@@ -1,0 +1,135 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 2,
+      "properties": {
+        "markdown": "# 🏥 Clinical AI Ops Agent — Live Dashboard\nReal-time drift monitoring, retraining events, and deployment health for all clinical ML endpoints."
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "PSI Score — lab_glucose",
+        "view": "timeSeries",
+        "stat": "Maximum",
+        "period": 21600,
+        "metrics": [
+          ["ClinicalAIOps/DriftMonitoring", "PSIScore",
+           "EndpointName", "clinical-risk-model-v2",
+           "Feature", "lab_glucose",
+           "Environment", "prod"]
+        ],
+        "annotations": {
+          "horizontal": [
+            {"label": "Retrain threshold", "value": 0.20, "color": "#ff9900"},
+            {"label": "Critical threshold", "value": 0.25, "color": "#ff0000"}
+          ]
+        },
+        "yAxis": {"left": {"min": 0, "max": 0.5}}
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "PSI Score — lab_creatinine",
+        "view": "timeSeries",
+        "stat": "Maximum",
+        "period": 21600,
+        "metrics": [
+          ["ClinicalAIOps/DriftMonitoring", "PSIScore",
+           "EndpointName", "clinical-risk-model-v2",
+           "Feature", "lab_creatinine",
+           "Environment", "prod"]
+        ],
+        "annotations": {
+          "horizontal": [
+            {"label": "Retrain threshold", "value": 0.20, "color": "#ff9900"},
+            {"label": "Critical threshold", "value": 0.25, "color": "#ff0000"}
+          ]
+        },
+        "yAxis": {"left": {"min": 0, "max": 0.5}}
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "Drift Severity (0=stable, 1=drift, 2=critical)",
+        "view": "timeSeries",
+        "stat": "Maximum",
+        "period": 21600,
+        "metrics": [
+          ["ClinicalAIOps/DriftMonitoring", "DriftSeverity",
+           "EndpointName", "clinical-risk-model-v2",
+           "Environment", "prod",
+           {"color": "#6366f1"}]
+        ],
+        "annotations": {
+          "horizontal": [
+            {"label": "Drift detected", "value": 1, "color": "#ff9900"},
+            {"label": "Critical", "value": 2, "color": "#ff0000"}
+          ]
+        },
+        "yAxis": {"left": {"min": 0, "max": 3}}
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "Drifted Feature Count per Run",
+        "view": "bar",
+        "stat": "Maximum",
+        "period": 21600,
+        "metrics": [
+          ["ClinicalAIOps/DriftMonitoring", "DriftedFeatureCount",
+           "EndpointName", "clinical-risk-model-v2",
+           "Environment", "prod"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "Deployment Validation F1",
+        "view": "timeSeries",
+        "stat": "Maximum",
+        "period": 86400,
+        "metrics": [
+          ["ClinicalAIOps/DriftMonitoring", "DeploymentValidationF1",
+           "EndpointName", "clinical-risk-model-v2",
+           "Environment", "prod",
+           {"color": "#22c55e"}]
+        ],
+        "annotations": {
+          "horizontal": [
+            {"label": "Safety threshold (0.80)", "value": 0.80, "color": "#ff0000"}
+          ]
+        },
+        "yAxis": {"left": {"min": 0, "max": 1}}
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 8, "width": 8, "height": 6,
+      "properties": {
+        "title": "Agent Lambda — Errors & Duration",
+        "view": "timeSeries",
+        "stat": "Sum",
+        "period": 21600,
+        "metrics": [
+          ["AWS/Lambda", "Errors",
+           "FunctionName", "clinical-ai-ops-agent-prod",
+           {"color": "#ef4444", "label": "Errors"}],
+          ["AWS/Lambda", "Invocations",
+           "FunctionName", "clinical-ai-ops-agent-prod",
+           {"color": "#22c55e", "label": "Invocations"}]
+        ]
+      }
+    }
+  ]
+}

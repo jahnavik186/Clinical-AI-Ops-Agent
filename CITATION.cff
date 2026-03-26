@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it using the metadata below."
+type: software
+title: "Clinical-AI-Ops-Agent: Agentic MLOps for Autonomous Healthcare Model Monitoring"
+abstract: >
+  An agentic AI system that autonomously monitors deployed clinical ML models,
+  detects data drift using PSI and KS statistical tests, triggers SageMaker
+  retraining pipelines, validates new models against safety thresholds, and
+  deploys using blue/green traffic shifting on AWS — without human intervention.
+authors:
+  - family-names: Kachhia
+    given-names: Jahnavi
+    orcid: "https://orcid.org/0009-0000-5870-5132"
+    affiliation: Abbott
+repository-code: "https://github.com/jahnavik186/Clinical-AI-Ops-Agent"
+url: "https://jahnavik186.github.io"
+license: MIT
+version: "1.0.0"
+date-released: "2025-01-01"
+keywords:
+  - agentic-ai
+  - mlops
+  - healthcare-ai
+  - aws-sagemaker
+  - drift-detection
+  - langgraph
+  - clinical-nlp
+  - model-monitoring

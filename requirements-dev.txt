@@ -1,0 +1,11 @@
+# Testing
+pytest>=8.3.0
+pytest-cov>=6.0.0
+pytest-mock>=3.14.0
+
+# Linting & formatting
+ruff>=0.8.0
+black>=24.10.0
+
+# Security
+bandit>=1.8.0

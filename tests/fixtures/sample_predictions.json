@@ -1,0 +1,1 @@
+{"endpoint": "clinical-risk-model-v2", "predictions": [{"age": 58, "bmi": 27.3, "lab_glucose": 145, "label": 1}]}

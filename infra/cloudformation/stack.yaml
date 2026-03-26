@@ -1,0 +1,279 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Clinical AI Ops Agent — Full Infrastructure Stack
+  Deploys Lambda, DynamoDB, SNS, S3, EventBridge, and IAM roles
+  for autonomous clinical ML model monitoring.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment
+
+  NotificationEmail:
+    Type: String
+    Description: Email address for drift/deployment alerts
+
+  MonitoredEndpoints:
+    Type: String
+    Default: "clinical-risk-model-v2"
+    Description: Comma-separated list of SageMaker endpoint names to monitor
+
+  AgentSchedule:
+    Type: String
+    Default: "rate(6 hours)"
+    Description: EventBridge schedule expression for agent runs
+
+  F1SafetyThreshold:
+    Type: String
+    Default: "0.80"
+    Description: Minimum validation F1 required before deploying new model
+
+  PsiRetrainThreshold:
+    Type: String
+    Default: "0.20"
+    Description: PSI score above which retraining is triggered
+
+Resources:
+
+  # ── S3 Bucket ────────────────────────────────────────────────────────────────
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "clinical-ai-ops-data-${AWS::AccountId}-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            Prefix: prediction-logs/
+            ExpirationInDays: 90
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ── DynamoDB Table ────────────────────────────────────────────────────────────
+  AgentStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clinical-ai-ops-agent-state-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD_INFREQUENT_ACCESS
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ── SNS Topic ─────────────────────────────────────────────────────────────────
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "clinical-ai-ops-alerts-${Environment}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref NotificationEmail
+
+  # ── IAM Role for Lambda ───────────────────────────────────────────────────────
+  AgentLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "clinical-ai-ops-agent-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ClinicalAIOpsAgentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataBucket.Arn
+                  - !Sub "${DataBucket.Arn}/*"
+
+              - Sid: DynamoDBAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt AgentStateTable.Arn
+
+              - Sid: SNSPublish
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+
+              - Sid: SageMakerAccess
+                Effect: Allow
+                Action:
+                  - sagemaker:StartPipelineExecution
+                  - sagemaker:DescribePipelineExecution
+                  - sagemaker:ListPipelineExecutionSteps
+                  - sagemaker:UpdateEndpoint
+                  - sagemaker:DescribeEndpoint
+                  - sagemaker:CreateModel
+                  - sagemaker:CreateEndpointConfig
+                  - sagemaker:UpdateEndpointWeightsAndCapacities
+                Resource: "*"
+
+              - Sid: BedrockAccess
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: "*"
+
+              - Sid: CloudWatchMetrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+
+  # ── Lambda Function ───────────────────────────────────────────────────────────
+  AgentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "clinical-ai-ops-agent-${Environment}"
+      Description: "Agentic clinical ML model monitoring and auto-remediation"
+      Runtime: python3.12
+      Handler: agent.orchestrator.lambda_handler
+      Role: !GetAtt AgentLambdaRole.Arn
+      Timeout: 900      # 15 min max (pipeline can run long)
+      MemorySize: 1024
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DATA_BUCKET: !Ref DataBucket
+          DYNAMODB_TABLE: !Ref AgentStateTable
+          SNS_TOPIC_ARN: !Ref AlertTopic
+          MONITORED_ENDPOINTS: !Ref MonitoredEndpoints
+          F1_SAFETY_THRESHOLD: !Ref F1SafetyThreshold
+          PSI_THRESHOLD_RETRAIN: !Ref PsiRetrainThreshold
+          SAGEMAKER_PIPELINE_NAME: !Sub "clinical-risk-model-pipeline-${Environment}"
+          SAGEMAKER_ROLE_ARN: !GetAtt SageMakerExecutionRole.Arn
+
+  # ── EventBridge Scheduler ─────────────────────────────────────────────────────
+  AgentScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "clinical-ai-ops-agent-schedule-${Environment}"
+      Description: "Trigger Clinical AI Ops Agent on schedule"
+      ScheduleExpression: !Ref AgentSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt AgentLambda.Arn
+          Id: AgentLambdaTarget
+          Input: !Sub |
+            {
+              "endpoints": ["${MonitoredEndpoints}"],
+              "triggered_by": "schedule"
+            }
+
+  AgentSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AgentLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AgentScheduleRule.Arn
+
+  # ── SageMaker Execution Role ──────────────────────────────────────────────────
+  SageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "clinical-ai-ops-sagemaker-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  # ── CloudWatch Alarms ─────────────────────────────────────────────────────────
+  AgentErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "clinical-ai-ops-agent-errors-${Environment}"
+      AlarmDescription: "Agent Lambda error rate exceeded threshold"
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref AgentLambda
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+Outputs:
+  DataBucketName:
+    Value: !Ref DataBucket
+    Description: S3 bucket for training data, baselines, and prediction logs
+    Export:
+      Name: !Sub "clinical-ai-ops-data-bucket-${Environment}"
+
+  AgentLambdaArn:
+    Value: !GetAtt AgentLambda.Arn
+    Description: ARN of the Clinical AI Ops Agent Lambda function
+    Export:
+      Name: !Sub "clinical-ai-ops-lambda-arn-${Environment}"
+
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+    Description: SNS topic ARN for drift and deployment alerts
+    Export:
+      Name: !Sub "clinical-ai-ops-sns-arn-${Environment}"
+
+  AgentStateTableName:
+    Value: !Ref AgentStateTable
+    Description: DynamoDB table for agent run history
+    Export:
+      Name: !Sub "clinical-ai-ops-dynamodb-${Environment}"
+
+  DeployCommand:
+    Value: !Sub >
+      aws cloudformation deploy
+      --template-file infra/cloudformation/stack.yaml
+      --stack-name clinical-ai-ops-${Environment}
+      --capabilities CAPABILITY_NAMED_IAM
+      --parameter-overrides Environment=${Environment} NotificationEmail=<your@email.com>
+    Description: Command to deploy this stack

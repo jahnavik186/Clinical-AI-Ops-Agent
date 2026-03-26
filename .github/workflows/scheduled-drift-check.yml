@@ -1,0 +1,57 @@
+name: Scheduled Drift Check
+
+on:
+  schedule:
+    # Run every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: "0 0,6,12,18 * * *"
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: SageMaker endpoint to check (leave blank for all)
+        required: false
+        default: ""
+
+jobs:
+  drift-check:
+    name: Trigger Drift Detection Agent
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Invoke agent Lambda
+        run: |
+          ENDPOINT="${{ github.event.inputs.endpoint }}"
+          if [ -z "$ENDPOINT" ]; then
+            PAYLOAD='{"triggered_by": "github_schedule"}'
+          else
+            PAYLOAD="{\"endpoints\": [\"$ENDPOINT\"], \"triggered_by\": \"manual_dispatch\"}"
+          fi
+
+          echo "Payload: $PAYLOAD"
+
+          aws lambda invoke \
+            --function-name clinical-ai-ops-agent-prod \
+            --payload "$PAYLOAD" \
+            --cli-binary-format raw-in-base64-out \
+            response.json
+
+          cat response.json
+
+      - name: Check for agent errors
+        run: |
+          python3 -c "
+          import json, sys
+          r = json.load(open('response.json'))
+          body = json.loads(r.get('body', '{}'))
+          errors = [k for k, v in body.items() if v.get('status') == 'error']
+          if errors:
+              print(f'❌ Agent errors for endpoints: {errors}')
+              sys.exit(1)
+          print('✅ All endpoints checked successfully')
+          "

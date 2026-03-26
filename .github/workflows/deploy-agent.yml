@@ -1,0 +1,90 @@
+name: Deploy Agent to AWS Lambda
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        default: prod
+        type: choice
+        options: [dev, staging, prod]
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: "3.14"
+  LAMBDA_FUNCTION_NAME: clinical-ai-ops-agent-prod
+
+jobs:
+  deploy:
+    name: Package & Deploy Lambda
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies into package directory
+        run: |
+          pip install -r requirements.txt -t lambda_package/
+          cp -r agent lambda_package/
+          cp -r pipelines lambda_package/
+          cp -r monitoring lambda_package/
+
+      - name: Package Lambda
+        run: |
+          cd lambda_package
+          zip -r ../agent.zip . -x "*.pyc" -x "__pycache__/*"
+          cd ..
+          echo "Package size: $(du -sh agent.zip | cut -f1)"
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://agent.zip \
+            --architectures x86_64
+
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+      - name: Verify deployment
+        run: |
+          aws lambda get-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --query '{State: State, LastModified: LastModified, Runtime: Runtime}'
+
+      - name: Smoke test — invoke agent
+        run: |
+          aws lambda invoke \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --payload '{"endpoints": ["clinical-risk-model-v2"], "triggered_by": "ci_smoke_test"}' \
+            --cli-binary-format raw-in-base64-out \
+            response.json
+          cat response.json
+          # Fail if statusCode is not 200
+          python3 -c "
+          import json
+          r = json.load(open('response.json'))
+          assert r.get('statusCode') == 200, f'Unexpected status: {r}'
+          print('✅ Smoke test passed')
+          "
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ Agent deployed successfully to ${{ env.LAMBDA_FUNCTION_NAME }}"
