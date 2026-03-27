@@ -7,7 +7,6 @@ Triggered automatically by the agent when drift is detected.
 """
 
 import os
-import boto3
 import sagemaker
 from sagemaker.workflow.pipeline import Pipeline
 from sagemaker.workflow.steps import ProcessingStep, TrainingStep

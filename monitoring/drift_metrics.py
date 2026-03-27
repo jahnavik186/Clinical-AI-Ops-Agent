@@ -10,7 +10,6 @@ Namespace: ClinicalAIOps/DriftMonitoring
 import logging
 import os
 from datetime import datetime
-from typing import Optional
 
 import boto3
 

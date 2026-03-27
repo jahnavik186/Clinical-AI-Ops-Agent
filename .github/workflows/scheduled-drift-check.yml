@@ -2,7 +2,6 @@ name: Scheduled Drift Check
 
 on:
   schedule:
-    # Run every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC
     - cron: "0 0,6,12,18 * * *"
   workflow_dispatch:
     inputs:
@@ -15,10 +14,20 @@ jobs:
   drift-check:
     name: Trigger Drift Detection Agent
     runs-on: ubuntu-latest
-    if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
 
     steps:
+      - name: Check AWS schedule secrets
+        id: aws_secrets
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "AWS schedule secrets not configured. Skipping scheduled drift check."
+          fi
+
       - name: Configure AWS credentials
+        if: steps.aws_secrets.outputs.configured == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -26,6 +35,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Invoke agent Lambda
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           ENDPOINT="${{ github.event.inputs.endpoint }}"
           if [ -z "$ENDPOINT" ]; then
@@ -45,6 +55,7 @@ jobs:
           cat response.json
 
       - name: Check for agent errors
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           python3 -c "
           import json, sys
@@ -52,7 +63,11 @@ jobs:
           body = json.loads(r.get('body', '{}'))
           errors = [k for k, v in body.items() if v.get('status') == 'error']
           if errors:
-              print(f'❌ Agent errors for endpoints: {errors}')
+              print(f'Agent errors for endpoints: {errors}')
               sys.exit(1)
-          print('✅ All endpoints checked successfully')
+          print('All endpoints checked successfully')
           "
+
+      - name: Skip scheduled drift check when AWS secrets are unavailable
+        if: steps.aws_secrets.outputs.configured != 'true'
+        run: echo "Skipping scheduled drift check because AWS repository secrets are not configured."

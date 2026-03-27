@@ -6,7 +6,6 @@ Enables the agent to reason about its own history across invocations
 (e.g., "has this endpoint been retrained in the last 24 hours?").
 """
 
-import json
 import logging
 import os
 from datetime import datetime, timedelta

@@ -22,17 +22,28 @@ jobs:
     name: Package & Deploy Lambda
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'prod' }}
-    if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check AWS deployment secrets
+        id: aws_secrets
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "AWS deployment secrets not configured. Skipping deploy job."
+          fi
+
       - name: Set up Python
+        if: steps.aws_secrets.outputs.configured == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Configure AWS credentials
+        if: steps.aws_secrets.outputs.configured == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -40,6 +51,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install dependencies into package directory
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           pip install -r requirements.txt -t lambda_package/
           cp -r agent lambda_package/
@@ -47,6 +59,7 @@ jobs:
           cp -r monitoring lambda_package/
 
       - name: Package Lambda
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           cd lambda_package
           zip -r ../agent.zip . -x "*.pyc" -x "__pycache__/*"
@@ -54,6 +67,7 @@ jobs:
           echo "Package size: $(du -sh agent.zip | cut -f1)"
 
       - name: Deploy to Lambda
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           aws lambda update-function-code \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
@@ -64,12 +78,14 @@ jobs:
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
 
       - name: Verify deployment
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           aws lambda get-function-configuration \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --query '{State: State, LastModified: LastModified, Runtime: Runtime}'
 
-      - name: Smoke test — invoke agent
+      - name: Smoke test invoke agent
+        if: steps.aws_secrets.outputs.configured == 'true'
         run: |
           aws lambda invoke \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
@@ -77,15 +93,17 @@ jobs:
             --cli-binary-format raw-in-base64-out \
             response.json
           cat response.json
-          # Fail if statusCode is not 200
           python3 -c "
           import json
           r = json.load(open('response.json'))
           assert r.get('statusCode') == 200, f'Unexpected status: {r}'
-          print('✅ Smoke test passed')
+          print('Smoke test passed')
           "
 
       - name: Notify deployment success
-        if: success()
-        run: |
-          echo "✅ Agent deployed successfully to ${{ env.LAMBDA_FUNCTION_NAME }}"
+        if: success() && steps.aws_secrets.outputs.configured == 'true'
+        run: echo "Agent deployed successfully to ${{ env.LAMBDA_FUNCTION_NAME }}"
+
+      - name: Skip deploy when AWS secrets are unavailable
+        if: steps.aws_secrets.outputs.configured != 'true'
+        run: echo "Skipping deploy because AWS repository secrets are not configured."

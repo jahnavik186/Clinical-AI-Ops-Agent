@@ -5,11 +5,9 @@ Unit tests for drift detection, deployment safety gate, and alert publishing.
 All tests run without AWS credentials using mocks.
 """
 
-import json
-import pytest
+from unittest.mock import patch
+
 import numpy as np
-from unittest.mock import MagicMock, patch, ANY
-from datetime import datetime
 
 # ── Drift Detector Tests ───────────────────────────────────────────────────────
 
