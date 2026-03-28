@@ -1,8 +1,6 @@
-name: Deploy Agent to AWS Lambda
+name: Manual Deploy Agent to AWS Lambda
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -22,6 +20,9 @@ jobs:
     name: Package & Deploy Lambda
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'prod' }}
+    concurrency:
+      group: manual-lambda-deploy-${{ github.event.inputs.environment || 'prod' }}
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
